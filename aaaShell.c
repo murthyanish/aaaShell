@@ -47,9 +47,9 @@ process(char *input, char **parsedInput){
 					processStatus += ((i*4) + 3);
 				}
 			}
-		}
-		if((processStatus & 1) == 0){
-			processStatus+=1;
+			if((processStatus & 1) == 0 && strcmp(parsedinput[i],"") != 0){
+				processStatus+=1;
+			}
 		}
 	}
 	return processStatus;
@@ -65,7 +65,7 @@ main(int argc, char *argv[]){
 	int exit = 0;
 	int processStatus;
 	while(!exit){
-		printf("|=");
+		printf("%s:%s |= ", getenv("USER"), getenv("PWD"));
 		n = getline(&input, &size, stdin);
 		input[n-1] = '\0';
 
@@ -82,6 +82,16 @@ main(int argc, char *argv[]){
 					case 0:
 						exit = 1;
 						break;
+					case 1:
+						if(chdir(parsedInput[1]))
+							perror("cd");
+						else {
+							char *cwd = malloc(sizeof(char)*100);
+							getcwd(cwd, 100);
+							setenv("PWD", cwd, 1);
+							free(cwd);
+						}
+						break;    
 				}
 			}
 			else
