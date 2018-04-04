@@ -9,20 +9,28 @@
 
 #define	start_index	0
 #define alias_max	10
+#define history_max	10
 
 
+//Alias variables
 struct ALIAS{
 	char* name;
 	char* value;
 	};
 struct ALIAS alias_vals[alias_max];
+int alias_curr = -1;
 
+// History variables
+char *history_vals[history_max];
+int hist_begin = -1;
+int hist_curr = -1;
+
+
+//Others
 int EXIT_SHELL = 1;
 pid_t wpid;
 int status = 0;
-int alias_curr = -1;
 
-char* history[25];
 
 
 char* getpwd(){
@@ -45,6 +53,8 @@ int is_alias(char* cmd){
 //CUSTOM FUCNTIONS - for shell specific commands
  //cd = returns 1
  //alias = returns 2
+ //aliased func = return -2
+ //history = returns 3
 int is_custom(char* cmd){
 	char* token = strtok(cmd," ");
 	if(strcmp("cd",token) == 0){
@@ -52,6 +62,9 @@ int is_custom(char* cmd){
 	}
 	if(strcmp("alias",token) == 0){
 		return 2;
+	}
+	if(strcmp("history",token) == 0){
+		return 3;
 	}
 	if(is_alias(cmd) != -1){
 		return -2;
@@ -208,6 +221,9 @@ void shell_exec(char* cmd){
 			execvp(exec_argv[0],exec_argv);
 			exit(0);
 	}
+	for(int k=0;k<no_arg;k++){
+		free(exec_argv[k]);
+	}
 	return;
 }
 
@@ -234,6 +250,39 @@ char* shell_input(){
 		return cmd;
 	}
 }
+
+
+//History
+void shell_add_history(char *cmd){
+	if(history_vals[(hist_curr+1)%(history_max)] != 0){free( history_vals[(hist_curr+1)%(history_max)] );} 
+	history_vals[(hist_curr+1)%(history_max)] = (char*)malloc(sizeof(char) * (strlen(cmd)+1));
+	strcpy(history_vals[(hist_curr+1)%(history_max)],cmd);
+	
+	if(hist_begin == -1 || ((hist_curr+1)%history_max)==hist_curr ){hist_begin++;}
+	hist_curr = (hist_curr+1)%history_max;	
+	return;
+}
+
+void shell_history(){
+	if(hist_begin == -1){
+		printf("~~Shell is starving\n\t, execute more cmds pls~~\n");
+		return;
+	}
+	
+	else{
+		if(hist_curr == hist_begin){printf("~[%s]\n",history_vals[hist_begin]);}
+		else{
+			int ct = 1;
+			for(int i = hist_begin; i != hist_curr; i = (i+1)%history_max){
+				printf("#%d~[%s]\n",ct++,history_vals[i]);
+			}
+			printf("#%d~[%s]\n",ct++,history_vals[hist_curr]);
+		}
+	}
+	return;
+}
+
+
 
 void shell_start(char *cmd){
 	//clear();
@@ -272,8 +321,15 @@ void shell_start(char *cmd){
 				//aliased functions
 				shell_exec(alias_vals[is_alias(cmd)].value);
 			}
+			if(cus == 3){
+				//History
+				shell_history();
+			}
 		}
-		shell_exec(cmd);
+		else{
+			shell_exec(cmd);
+		}
+		shell_add_history(cmd);
 	}
 
 	return;
