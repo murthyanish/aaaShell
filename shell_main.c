@@ -13,7 +13,7 @@ int main(int argc,char **argv){
 	sleep(1);
 	while(EXIT_SHELL){
 		while((wpid = wait(&status)) > 0);
-		printf("USER_%s~@_@~:\t",getuser());
+		printf("USER_%s~@%s@~: ",getuser(),getpwd());
 		shell_start(shell_input());
 	}
 }
