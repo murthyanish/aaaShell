@@ -1,23 +1,75 @@
+
+// ------------------------- BadShell -----------------------------
+//	by Anish Murthy, Akhil Sundharam, Alekhya 
+//	
+//	Program flow:
+//	-	main : 	executes the loop which gets input and sends it for processing, then running.
+//		-	process :	processes the input and returns the separated input as well as the processStatus containing all runtime instructions for future commands
+//		-	runProcessed :	runs the commands received using the instructions in processStatus
+//			-	checks if process is a shell command or an executable command.
+//			-	runShellCmd :	runs shell commands
+//			-	
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #define BUFLEN 1000
 #define ARGMAX 100
 
 //#include "badShell.h"
 
-char *history[25] = {NULL};
-int hstart = -1;
-int hend = -1;
-int full = 0;
 
+char *getRedirectIn(char ** input){
+	int i;
+	for(i = 0; strcmp(input[i], "<"); i++);
+	if (input[++i] != NULL){
+		input[i-1] = NULL;
+		char *output;
+		strcpy(output, input[i]);
+		if(input[i+1] != NULL){
+			int j = 1;
+			while(input[i+j] != NULL){
+				input[i-2+j] = input[i+j];
+				input[i+j] = NULL;
+				j++;
+			}
+		}
+		return output;
+	}
+	else
+		return NULL;
+}
+
+char *getRedirectOut(char ** input){
+	int i;
+	for(i = 0; strcmp(input[i], ">"); i++);
+	if (input[++i] != NULL){
+		input[i-1] = NULL;
+		char *output;
+		strcpy(output, input[i]);
+		if(input[i+1] != NULL){
+			int j = 1;
+			while(input[i+j] != NULL){
+				input[i-2+j] = input[i+j];
+				input[i+j] = NULL;
+				j++;
+			}
+		}
+		return output;
+	}
+	else
+		return NULL;
+}
 
 //Function to run command sent in through parsedInput
 void
-runCmd(char **parsedInput){
+runCmd(char **parsedInput, int redirects){
 	pid_t pid = fork();
 	if(pid < 0){
 		perror("Unable to run");
@@ -25,6 +77,32 @@ runCmd(char **parsedInput){
 	}
 
 	else if(pid == 0){
+		if ((redirects & 1) == 1)
+		{
+			int fd;
+			if((fd = open(getRedirectIn(parsedInput), O_RDONLY)) < 0){
+				perror("open");
+				exit(EXIT_FAILURE);
+			}
+			if(dup2(fd, STDIN_FILENO) < 0){
+				perror("dup2");
+				exit(EXIT_FAILURE);
+			}
+			close(fd);
+		}
+		if ((redirects & 2) == 2)
+		{
+			int fd;
+			if((fd = open(getRedirectOut(parsedInput), O_WRONLY|O_CREAT, 0644)) < 0){
+				perror("open");
+				exit(EXIT_FAILURE);
+			}
+			if(dup2(fd, STDOUT_FILENO) < 0){
+				perror("dup2");
+				exit(EXIT_FAILURE);
+			}
+			close(fd);
+		}
 		if(execvp(parsedInput[0], parsedInput) < 0)
 			printf("Command \"%s\" could not be executed\n", parsedInput[0]);
 		exit(0);
@@ -73,6 +151,13 @@ process(char *input, char **parsedInput){
 			processStatus = processStatus | 16;
 			processStatus += 32;
 		}
+
+		if(!strcmp(parsedInput[i], "<")){
+			processStatus = processStatus | 512;
+		}
+		if(!strcmp(parsedInput[i], ">")){
+			processStatus = processStatus | 1024;
+		}
 	}
 
 	return processStatus;
@@ -83,7 +168,7 @@ void
 initPipes(int *pipefds, int numPipes){
 
 	for(int i = 0; i < (numPipes); i++){
-		if(pipe(pipefds + i*2) < 0) {
+		if(pipe(&(pipefds[i*2])) < 0) {
 			perror("pipe");
 			exit(EXIT_FAILURE);
 		}
@@ -91,11 +176,11 @@ initPipes(int *pipefds, int numPipes){
 }
 
 void
-runPipedCmd(char **parsedInput, int numPipes){
+runPipedCmd(char **parsedInput, int numPipes, int redirects){
 
 	numPipes++;
 	printf("Entered runPipedCmd, numPipes = %d\n", numPipes);
-	int pipefds[2*numPipes];
+	int pipefds[2*(numPipes+1)];
 
 	initPipes(pipefds, numPipes);
 
@@ -107,39 +192,72 @@ runPipedCmd(char **parsedInput, int numPipes){
 
 	for (int i = 0; i < numPipes; ++i)
 	{
-		printf("Pipe %d\n", i);
+		//printf("Pipe %d\n", i);
 		char *parsedPipe[ARGMAX] = {NULL};
 
 		while(parsedInput[++m] && strcmp(parsedInput[m], "|") != 0){	//Parsing first command to be piped
-			printf("copying %s\n", parsedInput[m]);
+			//printf("copying %s\n", parsedInput[m]);
 			parsedPipe[m-n] = parsedInput[m];
 		}
 		parsedPipe[m-n] = NULL;
 		
 		n = m+1;
 
-		printf("Cmd: %s\n", parsedPipe[0]);
+		//printf("Cmd: %s\n", parsedPipe[0]);
 
 		pid = fork();
 		if(pid == 0) {
-			printf("Exec %d\n", i);
-			//if not last command
-			if(i != numPipes-1){
+			//printf("Exec %d\n", i);
 
-				if(dup2(pipefds[(i*2) + 1], 1) < 0){
+			//if not first command
+			//printf("if in %d\n", i);
+			if (i == 0 && (redirects & 1) == 1)
+			{
+				printf("input redirect\n");
+				int fd;
+				if((fd = open(getRedirectIn(parsedInput), O_RDONLY)) < 0){
+					perror("open");
+					exit(EXIT_FAILURE);
+				}
+				if(dup2(fd, STDIN_FILENO) < 0){
 					perror("dup2");
 					exit(EXIT_FAILURE);
 				}
+				printf("%d\n", fd);
+				close(fd);
 			}
-
-            //if not first command&& j!= 2*numPipes
 			if(i != 0){
-				if(dup2(pipefds[(i*2)-2], 0) < 0){
+				printf("Setting in of %d\n", i);
+				if(dup2(pipefds[(i*2)-2], STDIN_FILENO) < 0){
 					perror("dup2");///j-2 0 j+1 1
 					exit(EXIT_FAILURE);
 
 				}
 			}
+
+			if((i >= numPipes-1) && ((redirects & 2) == 2)){
+				printf("output redirect\n");
+				int fd;
+				if((fd = open(getRedirectOut(parsedInput), O_WRONLY|O_CREAT, 0644)) < 0){
+					perror("open");
+					exit(EXIT_FAILURE);
+				}
+				if(dup2(fd, STDOUT_FILENO) < 0){
+					perror("dup2");
+					exit(EXIT_FAILURE);
+				}
+				close(fd);
+			}
+			//if not last command
+			if(i < numPipes-1){
+				printf("Setting out of %d\n", i);
+				if(dup2(pipefds[(i*2)+1], STDOUT_FILENO) < 0){
+					perror("dup2");
+					exit(EXIT_FAILURE);
+				}
+			}
+			//printf("end of out %d\n", i);
+
 
 
             for(int j = 0; j < 2*numPipes; j++){
@@ -168,14 +286,15 @@ runPipedCmd(char **parsedInput, int numPipes){
 
     for(int i = 0; i < numPipes; i++){
         wait(&status);
-        printf("ended %d\n", i);
+        if(status == EXIT_FAILURE)
+        	printf("fail %d\n", i);
 	}
 
 	//BUG: when using multiple command pipes with IO for each, program goes into an infinite wait.
 	//	Bug does not appear when piping is removed and simply run
 	//	Entering the required input does not make any change, main process simply ignored all input and continues to wait.
 
-	printf("End of runPipedCmd\n");
+	//printf("End of runPipedCmd\n");
 
 }
 
@@ -187,7 +306,7 @@ processIsValid(int ps){
 }
 
 int
-processIsUserDefined(int ps){
+processIsShellCmd(int ps){
 	return (ps & 2);
 }
 
@@ -198,19 +317,23 @@ processIsPiped(int ps){
 
 int
 processGetNumPipes(int ps){
-	return ((ps-16)/32);
+	return (((ps%512)-16)/32);
 }
 
 int
-processUserDefinedCmdId(int ps){
+processShellCmdId(int ps){
 	return ((ps-3)/4);
+}
+
+int processGetRedirects(int ps){
+	return (ps/512);
 }
 
 
 //runs user defined commands
 void
-processUserDefined(int processStatus, char **parsedInput, int *exit){
-	switch(processUserDefinedCmdId(processStatus)){
+processShellCmd(int processStatus, char **parsedInput, int *exit){
+	switch(processShellCmdId(processStatus)){
 		case 0:		//exit case
 			*exit = 1;
 			break;
@@ -236,15 +359,16 @@ runProcessed(int processStatus, char **parsedInput, int *exit){
 		//checking the bit string
 		if (processIsValid(processStatus))	//valid command
 		{
-			if (processIsUserDefined(processStatus))	//user defined command
-			{
-				processUserDefined(processStatus, parsedInput, exit);
-			}
-			else if(processIsPiped(processStatus)){
-				runPipedCmd(parsedInput, processGetNumPipes(processStatus));
-			}
-			else	//valid command which is not a user defined command
-				runCmd(parsedInput);
+			if (processIsShellCmd(processStatus))	//shell command
+				processShellCmd(processStatus, parsedInput, exit);
+
+
+			else if(processIsPiped(processStatus))		//command contains pipes
+				runPipedCmd(parsedInput, processGetNumPipes(processStatus), processGetRedirects(processStatus));
+
+
+			else	//valid command which is not a shell or piped command
+				runCmd(parsedInput, processGetRedirects(processStatus));
 		}
 }
 
