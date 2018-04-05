@@ -7,39 +7,13 @@
 #define BUFLEN 1000
 #define ARGMAX 100
 
+//#include "badShell.h"
+
 char *history[25] = {NULL};
 int hstart = -1;
 int hend = -1;
 int full = 0;
 
-/*int
-histInit(){
-	for (int i = 0; i < 25; i++){
-		history[i] = malloc(BUFLEN);
-	}
-}*/
-
-/*int histPrint(){
-	for(int i = hstart; i+1)!=
-}*/
-
-/*int
-histPush(char *input){
-	if(hstart == -1){
-		hstart = 0;
-		hend = 0;
-	}
-	hend = (hend+1)%25;
-	if(strcpy(history[hend], input))
-		return -1;
-	if(!full){
-		if(hend == 0)	full = 1;
-	}
-	else if(hend == hstart+1){
-		hstart++;
-	}
-	return 0;
-}*/
 
 //Function to run command sent in through parsedInput
 void
@@ -104,12 +78,9 @@ process(char *input, char **parsedInput){
 	return processStatus;
 }
 
+//initialising pipes used in runPipedCmd
 void
-runPipedCmd(char **parsedInput, int numPipes){
-
-	numPipes++;
-	printf("Entered runPipedCmd, numPipes = %d\n", numPipes);
-	int pipefds[2*numPipes];
+initPipes(int *pipefds, int numPipes){
 
 	for(int i = 0; i < (numPipes); i++){
 		if(pipe(pipefds + i*2) < 0) {
@@ -117,6 +88,16 @@ runPipedCmd(char **parsedInput, int numPipes){
 			exit(EXIT_FAILURE);
 		}
 	}
+}
+
+void
+runPipedCmd(char **parsedInput, int numPipes){
+
+	numPipes++;
+	printf("Entered runPipedCmd, numPipes = %d\n", numPipes);
+	int pipefds[2*numPipes];
+
+	initPipes(pipefds, numPipes);
 
 	printf("Pipes created\n");
 
@@ -183,33 +164,91 @@ runPipedCmd(char **parsedInput, int numPipes){
 
     int status;
 
-    while(wait(&status) > 0);
+    //while(wait(&status) > 0);
 
-    /*for(int i = 0; i < numPipes; i++){
+    for(int i = 0; i < numPipes; i++){
         wait(&status);
         printf("ended %d\n", i);
-	}*/
+	}
+
+	//BUG: when using multiple command pipes with IO for each, program goes into an infinite wait.
+	//	Bug does not appear when piping is removed and simply run
+	//	Entering the required input does not make any change, main process simply ignored all input and continues to wait.
 
 	printf("End of runPipedCmd\n");
 
 }
 
-/*
+
+//status checkers
+int
+processIsValid(int ps){
+	return (ps & 1);
+}
+
+int
+processIsUserDefined(int ps){
+	return (ps & 2);
+}
+
+int
+processIsPiped(int ps){
+	return (ps & 16);
+}
+
+int
+processGetNumPipes(int ps){
+	return ((ps-16)/32);
+}
+
+int
+processUserDefinedCmdId(int ps){
+	return ((ps-3)/4);
+}
+
+
+//runs user defined commands
 void
-runPipedCmd(char **parsedInput){	//Running of piped commands
-	char *parsedPipe[ARGMAX] = {NULL};
-	int i = -1;
-
-	while(parsedInput[++i] && strcmp(parsedInput[i], "||") != 0){	//Parsing first command to be piped
-		parsedPipe[i] = parsedInput[i];
+processUserDefined(int processStatus, char **parsedInput, int *exit){
+	switch(processUserDefinedCmdId(processStatus)){
+		case 0:		//exit case
+			*exit = 1;
+			break;
+		case 1:		//change directory case
+			if(chdir(parsedInput[1]))
+				perror("cd");
+			else {
+				char *cwd = malloc(sizeof(char)*100);
+				getcwd(cwd, 100);
+				setenv("PWD", cwd, 1);
+				free(cwd);
+			}
+			break;
+		case 2:		//help case
+			printf("help:\nbadShell created by Anish M, Akhil S and Alekhya E\nMarch 2018\nCommands:\n\texit - quit the shell\n\tcd - change directory\n\thelp - Print help info\n");
 	}
-	parsedPipe[i] = NULL;
+}
 
-	runCmd(parsedPipe);
 
-	if(parsedInput[i] != NULL)
-		runPipedCmd(&parsedInput[i+1]);
-}*/
+
+void
+runProcessed(int processStatus, char **parsedInput, int *exit){
+		//checking the bit string
+		if (processIsValid(processStatus))	//valid command
+		{
+			if (processIsUserDefined(processStatus))	//user defined command
+			{
+				processUserDefined(processStatus, parsedInput, exit);
+			}
+			else if(processIsPiped(processStatus)){
+				runPipedCmd(parsedInput, processGetNumPipes(processStatus));
+			}
+			else	//valid command which is not a user defined command
+				runCmd(parsedInput);
+		}
+}
+
+
 
 //Main function reads input and calls the relevant function or runs the relevant code.
 int
@@ -233,35 +272,8 @@ main(int argc, char *argv[]){
 		//processing input
 		processStatus = process(input, parsedInput);
 
-		//checking the bit string
-		if (processStatus & 1)	//valid command
-		{
-			if (processStatus & 2)	//user defined command
-			{
-				switch((processStatus-3)/4){
-					case 0:		//exit case
-						exit = 1;
-						break;
-					case 1:		//change directory case
-						if(chdir(parsedInput[1]))
-							perror("cd");
-						else {
-							char *cwd = malloc(sizeof(char)*100);
-							getcwd(cwd, 100);
-							setenv("PWD", cwd, 1);
-							free(cwd);
-						}
-						break;
-					case 2:		//help case
-						printf("help:\nbadShell created by Anish M, Akhil S and Alekhya E\nMarch 2018\nCommands:\n\texit - quit the shell\n\tcd - change directory\n\thelp - Print help info\n");
-				}
-			}
-			else if(processStatus & 16){
-				runPipedCmd(parsedInput, (processStatus-16)/32);
-			}
-			else	//valid command which is not a user defined command
-				runCmd(parsedInput);
-		}
+		runProcessed(processStatus, parsedInput, &exit);
+
 	}
 	return 0;
 }
