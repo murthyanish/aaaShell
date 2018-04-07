@@ -29,6 +29,7 @@ char *getRedirectIn(char ** input){
 	int i;
 	for(i = 0; strcmp(input[i], "<"); i++);
 	if (input[++i] != NULL){
+		printf("redirectin\n");
 		input[i-1] = NULL;
 		char *output;
 		strcpy(output, input[i]);
@@ -39,7 +40,12 @@ char *getRedirectIn(char ** input){
 				input[i+j] = NULL;
 				j++;
 			}
+			input[i+j-2] = NULL;
 		}
+		if(output == NULL){
+			printf("NULL\n");
+		}
+		else printf("out: %s\n", output);
 		return output;
 	}
 	else
@@ -50,21 +56,42 @@ char *getRedirectOut(char ** input){
 	int i;
 	for(i = 0; strcmp(input[i], ">"); i++);
 	if (input[++i] != NULL){
+		printf("out obtained %s\n", input[i-1]);
 		input[i-1] = NULL;
 		char *output;
 		strcpy(output, input[i]);
 		if(input[i+1] != NULL){
+			printf("notnull\n");
 			int j = 1;
 			while(input[i+j] != NULL){
-				input[i-2+j] = input[i+j];
+				input[i+j-2] = input[i+j];
 				input[i+j] = NULL;
 				j++;
 			}
+			input[i+j-2] = NULL;
 		}
 		return output;
 	}
 	else
 		return NULL;
+}
+
+int
+hasRedirectIn(char **input){
+	int i = 0;
+	while(input[++i]!=NULL)
+		if(strcmp(input[i], "<") == 0)
+			return 1;
+	return 0;
+}
+
+int
+hasRedirectOut(char **input){
+	int i = 0;
+	while(input[++i]!=NULL)
+		if(strcmp(input[i], ">") == 0)
+			return 1;
+	return 0;
 }
 
 //Function to run command sent in through parsedInput
@@ -92,8 +119,9 @@ runCmd(char **parsedInput, int redirects){
 		}
 		if ((redirects & 2) == 2)
 		{
+			printf("out\n");
 			int fd;
-			if((fd = open(getRedirectOut(parsedInput), O_WRONLY|O_CREAT, 0644)) < 0){
+			if((fd = open(getRedirectOut(parsedInput), O_WRONLY|O_CREAT|O_TRUNC, 0644)) < 0){
 				perror("open");
 				exit(EXIT_FAILURE);
 			}
@@ -184,11 +212,12 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
 
 	initPipes(pipefds, numPipes);
 
-	printf("Pipes created\n");
+	//printf("Pipes created\n");
 
 	int m = -1;
 	int n = 0;
 	int pid;
+	int status;
 
 	for (int i = 0; i < numPipes; ++i)
 	{
@@ -200,22 +229,24 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
 			parsedPipe[m-n] = parsedInput[m];
 		}
 		parsedPipe[m-n] = NULL;
-		
 		n = m+1;
 
 		//printf("Cmd: %s\n", parsedPipe[0]);
-
+		if (i != 0)
+		{
+			wait(&status);
+		}
 		pid = fork();
 		if(pid == 0) {
 			//printf("Exec %d\n", i);
 
 			//if not first command
 			//printf("if in %d\n", i);
-			if (i == 0 && (redirects & 1) == 1)
+			if ((redirects & 1) == 1 && hasRedirectIn(parsedPipe))
 			{
-				printf("input redirect\n");
+				//printf("input redirect\n");
 				int fd;
-				if((fd = open(getRedirectIn(parsedInput), O_RDONLY)) < 0){
+				if((fd = open(getRedirectIn(parsedPipe), O_RDONLY)) < 0){
 					perror("open");
 					exit(EXIT_FAILURE);
 				}
@@ -223,11 +254,12 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
 					perror("dup2");
 					exit(EXIT_FAILURE);
 				}
-				printf("%d\n", fd);
+				//printf("%d\n", fd);
 				close(fd);
 			}
-			if(i != 0){
-				printf("Setting in of %d\n", i);
+			else if(i != 0){
+				write(pipefds[(i*2)-1], "\n", 1);
+				//printf("Setting in of %d\n", i);
 				if(dup2(pipefds[(i*2)-2], STDIN_FILENO) < 0){
 					perror("dup2");///j-2 0 j+1 1
 					exit(EXIT_FAILURE);
@@ -235,10 +267,10 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
 				}
 			}
 
-			if((i >= numPipes-1) && ((redirects & 2) == 2)){
-				printf("output redirect\n");
+			if(((redirects & 2) == 2) && hasRedirectOut(parsedPipe)){
+				//printf("output redirect\n");
 				int fd;
-				if((fd = open(getRedirectOut(parsedInput), O_WRONLY|O_CREAT, 0644)) < 0){
+				if((fd = open(getRedirectOut(parsedPipe), O_WRONLY|O_CREAT|O_TRUNC, 0644)) < 0){
 					perror("open");
 					exit(EXIT_FAILURE);
 				}
@@ -250,7 +282,7 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
 			}
 			//if not last command
 			if(i < numPipes-1){
-				printf("Setting out of %d\n", i);
+				//printf("Setting out of %d\n", i);
 				if(dup2(pipefds[(i*2)+1], STDOUT_FILENO) < 0){
 					perror("dup2");
 					exit(EXIT_FAILURE);
@@ -280,15 +312,9 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
         close(pipefds[i]);
     }
 
-    int status;
-
     //while(wait(&status) > 0);
 
-    for(int i = 0; i < numPipes; i++){
-        wait(&status);
-        if(status == EXIT_FAILURE)
-        	printf("fail %d\n", i);
-	}
+    wait(&status);
 
 	//BUG: when using multiple command pipes with IO for each, program goes into an infinite wait.
 	//	Bug does not appear when piping is removed and simply run
