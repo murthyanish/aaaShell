@@ -207,7 +207,7 @@ void
 runPipedCmd(char **parsedInput, int numPipes, int redirects){
 
 	numPipes++;
-	printf("Entered runPipedCmd, numPipes = %d\n", numPipes);
+	//printf("Entered runPipedCmd, numPipes = %d\n", numPipes);
 	int pipefds[2*(numPipes+1)];
 
 	initPipes(pipefds, numPipes);
