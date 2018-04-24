@@ -19,13 +19,127 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <dirent.h>
+
 #define BUFLEN 1000
 #define ARGMAX 100
 
-//#include "badShell.h"
+int is_regular_file(const char *path)
+{
+    struct stat path_stat;
+    stat(path, &path_stat);
+    return S_ISREG(path_stat.st_mode);
+}
+
+int searchFile(char *fname, char *str) {
+	FILE *fp;
+	int line_num = 1;
+	//int find_result = 0;
+	char temp[512];
+	
+	//gcc users
+	if((fp = fopen(fname, "r")) == NULL) {
+		return(-1);
+	}
+
+	while(fgets(temp, 512, fp) != NULL) {
+		if((strstr(temp, str)) != NULL) {
+			printf("file: %s\tline no: %d\t\nline content: ", fname, line_num);
+			printf("%s", temp);
+			//find_result++;
+		}
+		line_num++;
+	}
+
+	//if(find_result == 0) {
+	//	printf("\nSorry, couldn't find a match.\n");
+	//}
+	
+	//Close the file if still open.
+	if(fp) {
+		fclose(fp);
+	}
+   	return(0);
+}
+
+//void
+//searchFile(char* loc, char* pattern){
+//	printf("%s\n", loc);
+//}
+
+void readDir(char *directory, char *pattern, int recurse){
+	//printf("in directory: %s\n", directory);
+	struct dirent *de;  // Pointer for directory entry
+ 
+    // opendir() returns a pointer of DIR type. 
+    DIR *dr = opendir(directory);
+ 
+    if (dr == NULL)  // opendir returns NULL if couldn't open directory
+    {
+        printf("Could not open current directory: %s\n", directory);
+        return;
+    }
+    char* fullpath = malloc(sizeof(char)*100);;
+    de = readdir(dr);
+    de = readdir(dr);		//removing . & ..
+    while ((de = readdir(dr)) != NULL){
+    	strcpy(fullpath, "");
+    	strcat(fullpath, directory);
+    	strcat(fullpath, "/");
+    	strcat(fullpath, de->d_name);
+    	if(recurse && !is_regular_file(fullpath))
+    		readDir(fullpath, pattern, recurse);
+    	else if(is_regular_file(fullpath))
+            searchFile(fullpath, pattern);
+    }
+ 
+    closedir(dr);   
+}
+
+void
+sgown(char ** parsedInput){
+	//printf("In sgown\n");
+	char **temp = parsedInput;
+	int i;
+	for(i=0;temp[i]!=NULL;i++);
+	if(i<3){
+		printf("Usage: sgown [-r] [PATH] [PATTERN]\n");
+		return;
+	}
+	int recurse = 0;
+	if(strcmp(parsedInput[1], "-r") == 0){
+		recurse = 1;
+		if(i!=4){
+			printf("Usage: sgown [-r] [PATH] [PATTERN]\n");
+			return;
+		}
+	}
+			
+	char *cwd = malloc(sizeof(char)*50);
+	int readLoc = 1;
+	if(recurse)
+		readLoc = 2;
+
+	//printf("recurse: %d, readLoc: %d\n", recurse, readLoc);
+	if(strcmp(parsedInput[readLoc], "*") == 0){
+		//printf("in *\n");
+		if(!getcwd(cwd, 50)){
+			perror("cwd");
+			return;
+		}
+		//printf("cwd: %s\n", cwd);
+		readDir(cwd, parsedInput[readLoc+1], recurse);
+	}
+	else if(!is_regular_file(parsedInput[readLoc])){
+		readDir(parsedInput[readLoc], parsedInput[readLoc+1], recurse);
+	}
+	else
+		searchFile(parsedInput[readLoc], parsedInput[readLoc+1]);
+}
 
 
-char *getRedirectIn(char ** input){
+char*
+getRedirectIn(char ** input){
 	int i;
 	for(i = 0; strcmp(input[i], "<"); i++);
 	if (input[++i] != NULL){
@@ -52,7 +166,8 @@ char *getRedirectIn(char ** input){
 		return NULL;
 }
 
-char *getRedirectOut(char ** input){
+char*
+getRedirectOut(char ** input){
 	int i;
 	for(i = 0; strcmp(input[i], ">"); i++);
 	if (input[++i] != NULL){
@@ -159,14 +274,15 @@ process(char *input, char **parsedInput){
 	int i = -1;
 	int processStatus = 0;
 
-	char *userDefinedCommands[3];
+	char *userDefinedCommands[4];
 	userDefinedCommands[0] = "exit";
 	userDefinedCommands[1] = "cd";
 	userDefinedCommands[2] = "help";
+	userDefinedCommands[3] = "sgown";
 
 	while(parsedInput[++i] = strsep(&input, " ")){
 		if(i == 0){	//checking the first input substring
-			for (int i = 0; i < 3; ++i){
+			for (int i = 0; i < 4; ++i){
 				if(!strcmp(parsedInput[0], userDefinedCommands[i])){
 					processStatus += ((i*4) + 3);
 				}
@@ -258,7 +374,7 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
 				close(fd);
 			}
 			else if(i != 0){
-				write(pipefds[(i*2)-1], "\n", 1);
+				write(pipefds[(i*2)-1], "\n\n", 2);
 				//printf("Setting in of %d\n", i);
 				if(dup2(pipefds[(i*2)-2], STDIN_FILENO) < 0){
 					perror("dup2");///j-2 0 j+1 1
@@ -316,9 +432,9 @@ runPipedCmd(char **parsedInput, int numPipes, int redirects){
 
     wait(&status);
 
-	//BUG: when using multiple command pipes with IO for each, program goes into an infinite wait.
+	//BUG: when using multiple command pipes with IO for each, program sometimes goes into an infinite wait.
 	//	Bug does not appear when piping is removed and simply run
-	//	Entering the required input does not make any change, main process simply ignored all input and continues to wait.
+	//	Entering the required input does not make any change, main process simply ignores all input and continues to wait.
 
 	//printf("End of runPipedCmd\n");
 
@@ -374,7 +490,9 @@ processShellCmd(int processStatus, char **parsedInput, int *exit){
 			}
 			break;
 		case 2:		//help case
-			printf("help:\nbadShell created by Anish M, Akhil S and Alekhya E\nMarch 2018\nCommands:\n\texit - quit the shell\n\tcd - change directory\n\thelp - Print help info\n");
+			printf("help:\nbadShell created by Anish M, Akhil S and Alekhya E\nMarch 2018\nCommands:\n\texit - quit the shell\n\tcd - change directory\n\thelp - Print help info\n\tsgown - search for substring in all files in specified directory\n");
+		case 3:
+			sgown(parsedInput);
 	}
 }
 
