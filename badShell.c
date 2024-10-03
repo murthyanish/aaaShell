@@ -480,8 +480,9 @@ getRedirectOut(char ** input){
 	if (input[++i] != NULL){
 		//printf("out obtained %s\n", input[i-1]);
 		input[i-1] = NULL;
-		char *output;
+		char *output = (char*) malloc (sizeof(char) * 256);
 		strcpy(output, input[i]);
+		//printf("filename: %s\n", input[i]);
 		if(input[i+1] != NULL){
 			//printf("notnull\n");
 			int j = 1;
@@ -544,9 +545,10 @@ runCmd(char **parsedInput, int redirects){
 		}
 		if ((redirects & 2) == 2)
 		{
-			printf("out\n");
+			//printf("out\n");
 			int fd;
-			if((fd = open(getRedirectOut(parsedInput), O_WRONLY|O_CREAT|O_TRUNC, 0644)) < 0){
+			char * fileName = getRedirectOut(parsedInput);
+			if((fd = open(fileName, O_WRONLY|O_CREAT|O_TRUNC, 0644)) < 0){
 				perror("open");
 				exit(EXIT_FAILURE);
 			}
@@ -555,6 +557,7 @@ runCmd(char **parsedInput, int redirects){
 				exit(EXIT_FAILURE);
 			}
 			close(fd);
+			free(fileName);
 		}
 		if(execvp(parsedInput[0], parsedInput) < 0)
 			printf("Command \"%s\" could not be executed\n", parsedInput[0]);
